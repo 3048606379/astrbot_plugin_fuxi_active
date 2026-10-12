@@ -203,7 +203,7 @@ class FuxiActiveChat(Star):
     # ==================================================================
     # 事件缓存：为合成搭话事件提供模板
     # ==================================================================
-    @filter.event_message_type(filter.EventMessageType.ALL, priority=-1)
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=100)
     async def _on_message(self, event: AstrMessageEvent) -> None:
         try:
             # 跳过自己合成的搭话事件，避免覆盖真实事件 / 误记哥哥时间
@@ -364,8 +364,26 @@ class FuxiActiveChat(Star):
         return False
 
     @staticmethod
-    def _platform_supports_proactive(session_id: str) -> bool:
-        platform = (session_id.split(":")[0] if ":" in session_id else session_id).strip().lower()
+    def _adapter_name(last_event: Optional[AstrMessageEvent] = None,
+                      platform_info: Optional[dict] = None) -> str:
+        """取协议端适配器类型名（如 aiocqhttp）。
+
+        会话 id 的前缀是平台实例的显示名（例如「芙熙（napcat）」），不是适配器类型；
+        必须用 platform_meta.name 判断，否则自定义平台名会让 startswith 判断失效。
+        """
+        sources = (
+            getattr(last_event, "platform_meta", None) if last_event is not None else None,
+            (platform_info or {}).get("platform_meta"),
+        )
+        for pm in sources:
+            name = getattr(pm, "name", "") if pm is not None else ""
+            if name:
+                return str(name).strip().lower()
+        return ""
+
+    @staticmethod
+    def _platform_supports_proactive(session_id: str, adapter: str = "") -> bool:
+        platform = (adapter or (session_id.split(":")[0] if ":" in session_id else session_id)).strip().lower()
         return bool(platform) and platform not in _NO_PROACTIVE_PLATFORMS
 
     @staticmethod
@@ -425,29 +443,38 @@ class FuxiActiveChat(Star):
                 user_name=self._cfg_str("user_name", "哥哥"),
             )
 
-    async def _do_talk(self, session_id: str) -> bool:
-        """对指定会话执行一次搭话。返回是否成功发出。"""
-        if not self._platform_supports_proactive(session_id):
+    async def _do_talk(self, session_id: str, template_event: Optional[AstrMessageEvent] = None) -> bool:
+        """对指定会话执行一次搭话。返回是否成功发出。
+
+        template_event：可选的真实事件。手动 /搭话 现在 时把当前命令事件传进来，
+        当事件缓存为空（例如插件刚重载、哥哥还没发过消息）时用作合成模板，
+        避免误落到绕过框架管线的"直接发送"。
+        """
+        prompt = self._build_prompt(session_id)
+        platform = session_id.split(":")[0] if ":" in session_id else session_id
+        last_event = self._last_events.get(session_id) or template_event
+        platform_info = self._platform_cache.get(platform, {})
+        adapter = self._adapter_name(last_event, platform_info)
+
+        if not self._platform_supports_proactive(session_id, adapter):
             logger.warning(f"[芙熙搭话] 平台不支持主动消息，跳过 {session_id}。")
             return False
 
-        prompt = self._build_prompt(session_id)
-        platform = session_id.split(":")[0] if ":" in session_id else session_id
-        last_event = self._last_events.get(session_id)
-        platform_info = self._platform_cache.get(platform, {})
-
-        # 优先：有模板事件 → 合成事件走完整管线
-        if last_event or platform_info:
-            if platform.startswith("aiocqhttp"):
-                try:
-                    synth = self._make_synthetic_event(session_id, prompt, last_event, platform_info)
-                    self.context.get_event_queue().put_nowait(synth)
-                    logger.info(f"[芙熙搭话] 触发（合成事件管线）→ {session_id}")
-                    return True
-                except Exception as e:
-                    logger.warning(f"[芙熙搭话] 合成事件失败，回退直接发送: {e}")
+        # 有模板事件、且适配器类型兼容（未知时也尝试）→ 合成事件走完整管线
+        uses_synthetic = (
+            last_event is not None and (adapter == "" or adapter.startswith("aiocqhttp"))
+        )
+        if uses_synthetic:
+            try:
+                synth = self._make_synthetic_event(session_id, prompt, last_event, platform_info)
+                self.context.get_event_queue().put_nowait(synth)
+                logger.info(f"[芙熙搭话] 触发（合成事件管线）→ {session_id} | adapter={adapter or '未知'}")
+                return True
+            except Exception as e:
+                logger.warning(f"[芙熙搭话] 合成事件失败，回退直接发送: {e}")
 
         # 回退：直接调 LLM + 发送
+        logger.warning(f"[芙熙搭话] 回退直接发送（无模板事件或适配器不兼容）→ {session_id} | adapter={adapter or '未知'}")
         return await self._send_direct(session_id, prompt)
 
     def _make_synthetic_event(
@@ -666,10 +693,19 @@ class FuxiActiveChat(Star):
             return
 
         if action in ("现在", "now", "立即"):
-            ok = await self._do_talk(event.unified_msg_origin)
+            # 先用当前命令事件刷新缓存：即便插件刚重载、缓存为空，也能走合成事件管线
+            sid = event.unified_msg_origin
+            self._last_events[sid] = event
+            plat = sid.split(":")[0] if ":" in sid else sid
+            if hasattr(event, "platform_meta"):
+                self._platform_cache.setdefault(plat, {
+                    "platform_meta": getattr(event, "platform_meta", None),
+                    "self_id": getattr(getattr(event, "message_obj", None), "self_id", "") or "",
+                })
+            ok = await self._do_talk(sid, template_event=event)
             if ok:
-                self.state.setdefault("last_talk_ts", {})[event.unified_msg_origin] = time.time()
-                self._bump_daily(event.unified_msg_origin, datetime.now())
+                self.state.setdefault("last_talk_ts", {})[sid] = time.time()
+                self._bump_daily(sid, datetime.now())
                 self._save_state(force=True)
                 yield event.plain_result("（好啦，已经找过你了）")
             else:
