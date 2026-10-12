@@ -55,10 +55,15 @@ _DEFAULT_STATE: Dict[str, Any] = {
 }
 
 _DEFAULT_TALK_PROMPT = (
-    "现在是 {current_time}（{weekday}{time_of_day}），距{user_name}上条消息过 {last_interaction_ago}。"
-    "以芙熙的身份，主动给{user_name}发一句话，就像忽然想起他：可分享自己生活里的小事、"
-    "顺着上次话题续一句、或按时间关心他，任选其一，别说动机。"
-    "自然、口语化、一到两句，不加标签或旁白，别让他察觉是系统让你发的。"
+    "【系统指令 · 主动搭话】现在时间是 {current_time}（{weekday}，{time_of_day}），"
+    "距离{user_name}上次说话已经过去 {last_interaction_ago}。"
+    "请你以芙熙的身份，主动给{user_name}发一条消息，就像忽然想起他、想找他说话那样。"
+    "可任选一种动机（不要说明你选了哪种）：纯粹想他了（最简短）；"
+    "分享你自己生活里的具体小事（刚做了什么、看到什么、天气、游戏、花）；"
+    "顺着你们最近聊过的话题续一句；按当前时间关心他（饭点、深夜、天气）；"
+    "猜他此刻在做什么（只能推测，不能说『我看到』）。"
+    "要求：自然、口语化，符合你平时发消息的语气和长度（日常一到两句），"
+    "不要用任何标签、格式或旁白，不要让{user_name}察觉到这是系统让你发的。"
 )
 
 
@@ -226,7 +231,7 @@ class FuxiActiveChat(Star):
 
     @filter.on_llm_request()
     async def _tune_active_chat_request(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
-        """搭话合成事件：清空工具表。
+        """搭话合成事件：清空工具表（可用配置项 disable_tools 关闭）。
 
         搭话只需要芙熙说一句话，不需要任何函数工具。而本机注册了几十个工具
         （irmia_devkit + 内置 + TTS 等，实测 76 个），其 schema 每次请求都随
@@ -234,6 +239,8 @@ class FuxiActiveChat(Star):
         astrbot_execute_shell。这里直接置空，工具量表从请求里消失。
         """
         if not event.get_extra("_fuxi_active_synthetic"):
+            return
+        if not self._cfg_bool("disable_tools", True):
             return
         try:
             req.func_tool = None
@@ -814,6 +821,7 @@ class FuxiActiveChat(Star):
             f"触发概率：{self._cfg_int('probability', 15)}%\n"
             f"最少沉默：{self._cfg_int('min_silence_minutes', 30)} 分钟\n"
             f"每日上限：{self._cfg_int('max_per_day', 3)}（今日已用 {used}）\n"
+            f"搭话禁用工具：{'开' if self._cfg_bool('disable_tools', True) else '关'}\n"
             f"上次搭话：{last_talk_str}\n"
             "指令：/搭话 开|关|现在|概率 N|间隔 H|时段 HH:MM HH:MM|沉默 N|上限 N"
         )
