@@ -1,6 +1,8 @@
-name: helloworld # 插件唯一识别名，以 astrbot_plugin_ 前缀开头
-display_name: helloworld # 用于展示的名字，可以是方便人类阅读的名字（需要版本 >= v4.5.0，低版本不会报错，请放心填写）
-desc: AstrBot 插件示例。 # 插件简短描述
-version: v1.3.0 # 插件版本号。格式：v1.1.1 或者 v1.1
-author: Soulter # 作者
-repo: https://github.com/Soulter/helloworld # 插件的仓库地址
+name: astrbot_plugin_fuxi_active
+display_name: 芙熙主动搭话
+author: Tenet
+version: v1.0.0
+desc: "芙熙专属主动搭话插件：在允许时段内，按固定间隔 + 概率主动来找哥哥说话，内容由芙熙人设自然生成。独立实现，不依赖好感度/状态插件。"
+description: "芙熙专属主动搭话插件：在允许时段内，按固定间隔 + 概率主动来找哥哥说话，内容由芙熙人设自然生成。独立实现，不依赖好感度/状态插件。"
+repo: https://github.com/3048606379/astrbot_plugin_fuxi_active
+astrbot_version: ">=4.24"

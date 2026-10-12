@@ -1,14 +1,126 @@
-# astrbot-plugin-helloworld
+# 芙熙主动搭话插件（astrbot_plugin_fuxi_active）
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+给芙熙用的「主动搭话」插件：在允许时段内，按**固定间隔 + 概率**巡检，命中就让芙熙主动来找哥哥说话。
+**独立实现**，不依赖任何好感度 / 身体状态插件。
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+---
 
-# Supports
+## 一、它怎么工作
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+```
+后台调度器（asyncio）
+  │  每 (interval_hours ± interval_float_hours) 小时巡检一轮
+  ▼
+允许时段内？ ──否──▶ 跳过
+  │是
+  ▼
+遍历「已知会话」（哥哥发过消息的会话）
+  │  ① 会话未被黑名单命中 / 命中白名单
+  │  ② 沉默时长 ≥ min_silence_minutes
+  │  ③ 未达每日上限
+  │  ④ 概率命中（probability%）
+  ▼
+生成搭话提示词 → 发送
+  ├─ 有缓存事件（绝大多数情况，QQ）→ 合成事件进【完整九阶段管线】：
+  │    persona、分段、其它插件的 on_llm_request 全部生效
+  └─ 无缓存事件（如刚重启、哥哥还没说话）→ 直接调 LLM 生成 + 自行分段发送
+```
+
+- **每个会话每轮最多触发一次**，不会一轮连发。
+- 搭话内容由芙熙的人设 + 当前时间 + 距上次说话的时长共同生成，不自带好感度数值。
+- 支持发送的服务器/时段/概率/沉默门槛/每日上限都可在 WebUI 或聊天指令里改。
+
+---
+
+## 二、安装
+
+把整个 `astrbot_plugin_fuxi_active/` 目录放到 AstrBot 的插件目录：
+
+```
+# 服务器（Docker 部署，数据目录 bind-mount 到宿主机 /root/astrbot/data）
+/root/astrbot/data/plugins/astrbot_plugin_fuxi_active/
+```
+
+然后重启 AstrBot 或在管理面板重载插件。首次加载后建议把日志级别调到 `DEBUG`，方便观察调度器行为。
+
+---
+
+## 三、配置（WebUI）
+
+管理面板 → 插件管理 → 本插件详情 → 配置。关键项：
+
+| 配置项 | 默认 | 说明 |
+| --- | --- | --- |
+| `enabled` | 关 | 总开关。默认关，配好再开。 |
+| `time_start` / `time_end` | `09:00` / `23:30` | 允许搭话时段（服务器本地时间，HH:MM）。 |
+| `interval_hours` | `2.0` | 巡检基准间隔。 |
+| `interval_float_hours` | `0.5` | 间隔浮动，让搭话时间不规律。0 = 固定。 |
+| `probability` | `15` | 每轮每会话的触发概率（%）。 |
+| `min_silence_minutes` | `30` | 哥哥刚说话不久就不打扰。0 = 不限。 |
+| `max_per_day` | `3` | 每个会话每日上限。0 = 不限。 |
+| `max_sessions_per_round` | `1` | 每轮最多搭话会话数。一对一保持 1。 |
+| `allowed_sessions` / `blocked_sessions` | 空 | 会话白/黑名单，支持完整 UMO、纯尾缀（如 QQ 号）、平台前缀。黑名单优先。 |
+| `user_name` | `哥哥` | 提示词里 `{user_name}` 的替换值。 |
+| `llm_prompt` | 内置模板 | 搭话提示词模板，可用变量见下。 |
+
+提示词模板变量：`{current_time}` `{weekday}` `{time_of_day}` `{last_interaction_ago}` `{user_name}`。
+
+> 模板里刻意列了芙熙人设中的 5 种主动出现动机（想他 / 分享日常 / 续话题 / 按时间关心 / 猜他在做什么），
+> 让每次搭话的口吻有变化，不机械。
+
+---
+
+## 四、聊天指令
+
+所有指令仅 **Bot 管理员** 可用。运行时修改会写入插件数据目录的 `state.json`，覆盖 WebUI 配置并即时生效（`interval_hours` 下次巡检生效）。
+
+| 指令 | 作用 |
+| --- | --- |
+| `/搭话` 或 `/搭话 状态` | 查看当前开关、时段、间隔、概率、今日已用次数、上次搭话时间 |
+| `/搭话 开` / `/搭话 关` | 开 / 关主动搭话 |
+| `/搭话 现在` | 立即对当前会话手动触发一次搭话（绕过时段/沉默/概率，便于测试） |
+| `/搭话 概率 20` | 设置每轮触发概率（0-100） |
+| `/搭话 间隔 1.5` | 设置巡检基准间隔（小时，支持小数） |
+| `/搭话 时段 09:00 23:30` | 设置允许时段 |
+| `/搭话 沉默 30` | 设置最少沉默时长（分钟，0=不限） |
+| `/搭话 上限 3` | 设置每日上限（0=不限） |
+
+别名：`/主动搭话`、`/芙熙搭话`。
+
+---
+
+## 五、芙熙人格怎么接
+
+这个插件**不碰** system prompt，也不注入状态数据。它只负责「什么时候发、发一句话、让芙熙自己说」。
+所以：
+
+- 芙熙的人设继续放在 AstrBot 的**人格（persona）**里（即你的 A 层 system prompt）。
+- 你现有的行为层 / 状态插件继续走它自己的 `on_llm_request`。走合成事件管线时它照样生效；
+  只有「回退到直接发送」那条路不会触发 `on_llm_request`（极少发生，通常只在刚重启后哥哥还没说话时）。
+- 想改搭话口吻，改 `llm_prompt` 即可，不用动人设。
+
+---
+
+## 六、已知边界
+
+- **平台**：依赖平台适配器的「主动消息」能力。`weixin_official_account`（微信公众号）不支持，会被跳过。
+  QQ（`aiocqhttp` / NapCat）走完整管线，效果最好。
+- **重启后**：`_last_events` 与 `_platform_cache` 是内存缓存，重启后清空；
+  哥哥再发任意一条消息即恢复。在恢复前，已知会话可走「直接发送」兜底（若有会话记录）。
+- **时段不支持跨天**：`time_start` 必须早于 `time_end`（如需 22:00–06:00 的跨夜时段，当前版本不支持）。
+- **一对一私聊**：芙熙是私聊人格，`max_sessions_per_round` 保持 1 即可。
+
+---
+
+## 七、文件结构
+
+```
+astrbot_plugin_fuxi_active/
+├── metadata.yaml        # 插件清单
+├── main.py              # 全部逻辑
+├── _conf_schema.json    # WebUI 配置 schema
+└── README.md
+```
+
+运行时数据：`<data>/plugin_data/astrbot_plugin_fuxi_active/state.json`
+（记录哥哥最后说话时间、上次搭话时间、每日计数、指令覆盖值）

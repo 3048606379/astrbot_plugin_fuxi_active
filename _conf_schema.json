@@ -1,0 +1,80 @@
+{
+  "enabled": {
+    "description": "启用主动搭话",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后，插件会按『巡检间隔』在允许时段内巡检，命中概率就主动找哥哥说话。默认关闭，配好再打开。"
+  },
+  "time_start": {
+    "description": "允许搭话的开始时间",
+    "type": "string",
+    "default": "09:00",
+    "hint": "格式 HH:MM，使用 AstrBot 所在机器的本地时间。开始时间必须早于结束时间（不支持跨天）。"
+  },
+  "time_end": {
+    "description": "允许搭话的结束时间",
+    "type": "string",
+    "default": "23:30",
+    "hint": "格式 HH:MM。深夜时段通常不建议开，免得打扰哥哥睡觉。"
+  },
+  "interval_hours": {
+    "description": "巡检基准间隔（小时）",
+    "type": "float",
+    "default": 2.0,
+    "hint": "每隔这么久巡检一轮。运行时最低按 0.1 小时（6 分钟）计。"
+  },
+  "interval_float_hours": {
+    "description": "巡检间隔浮动幅度（小时）",
+    "type": "float",
+    "default": 0.5,
+    "hint": "0 = 固定间隔；大于 0 时在『基准 ± 浮动』内随机等待，让搭话时间不规律，更像真人。"
+  },
+  "probability": {
+    "description": "每轮触发概率（%）",
+    "type": "int",
+    "default": 15,
+    "hint": "0-100。每个会话每轮独立掷骰；不是每轮必发。想更黏就调高。"
+  },
+  "min_silence_minutes": {
+    "description": "最少沉默时长（分钟）",
+    "type": "int",
+    "default": 30,
+    "hint": "哥哥刚说过话、还没过这么久就不打扰。0 = 不限制（可能刚聊完又来）。"
+  },
+  "max_per_day": {
+    "description": "每个会话每日搭话上限",
+    "type": "int",
+    "default": 3,
+    "hint": "0 = 不限制。用来防止一天被刷屏。"
+  },
+  "max_sessions_per_round": {
+    "description": "每轮最多搭话的会话数",
+    "type": "int",
+    "default": 1,
+    "hint": "0 = 不限制。芙熙是一对一私聊时保持 1 即可。"
+  },
+  "allowed_sessions": {
+    "description": "搭话会话白名单",
+    "type": "list",
+    "default": [],
+    "hint": "留空 = 全部允许。可填完整 UMO（如 aiocqhttp:FriendMessage:123456）、纯尾缀（如 QQ 号 123456）或平台前缀。黑名单优先。"
+  },
+  "blocked_sessions": {
+    "description": "搭话会话黑名单",
+    "type": "list",
+    "default": [],
+    "hint": "命中的会话不参与主动搭话。"
+  },
+  "user_name": {
+    "description": "对哥哥的称呼",
+    "type": "string",
+    "default": "哥哥",
+    "hint": "会替换提示词里的 {user_name}。芙熙默认叫『哥哥』。"
+  },
+  "llm_prompt": {
+    "description": "搭话提示词模板",
+    "type": "text",
+    "default": "【系统指令 · 主动搭话】现在时间是 {current_time}（{weekday}，{time_of_day}），距离{user_name}上次说话已经过去 {last_interaction_ago}。请你以芙熙的身份，主动给{user_name}发一条消息，就像忽然想起他、想找他说话那样。可任选一种动机（不要说明你选了哪种）：纯粹想他了（最简短）；分享你自己生活里的具体小事（刚做了什么、看到什么、天气、游戏、花）；顺着你们最近聊过的话题续一句；按当前时间关心他（饭点、深夜、天气）；猜他此刻在做什么（只能推测，不能说『我看到』）。要求：自然、口语化，符合你平时发消息的语气和长度（日常一到两句），不要用任何标签、格式或旁白，不要让{user_name}察觉到这是系统让你发的。",
+    "hint": "可用变量：{current_time} {weekday} {time_of_day} {last_interaction_ago} {user_name}。"
+  }
+}
