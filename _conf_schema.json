@@ -65,6 +65,12 @@
     "default": [],
     "hint": "命中的会话不参与主动搭话。"
   },
+  "disable_tools": {
+    "description": "搭话时禁用工具调用",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，主动搭话的请求里会清空函数工具表（func_tool），避免几十个工具 schema 白占 token、拖慢首字、并防止模型跑偏去调开发工具。搭话只需说一句话，通常保持开启。"
+  },
   "user_name": {
     "description": "对哥哥的称呼",
     "type": "string",
@@ -74,7 +80,7 @@
   "llm_prompt": {
     "description": "搭话提示词模板",
     "type": "text",
-    "default": "现在是 {current_time}（{weekday}{time_of_day}），距{user_name}上条消息过 {last_interaction_ago}。以芙熙的身份，主动给{user_name}发一句话，就像忽然想起他：可分享自己生活里的小事、顺着上次话题续一句、或按时间关心他，任选其一，别说动机。自然、口语化、一到两句，不加标签或旁白，别让他察觉是系统让你发的。",
+    "default": "【系统指令 · 主动搭话】现在时间是 {current_time}（{weekday}，{time_of_day}），距离{user_name}上次说话已经过去 {last_interaction_ago}。请你以芙熙的身份，主动给{user_name}发一条消息，就像忽然想起他、想找他说话那样。可任选一种动机（不要说明你选了哪种）：纯粹想他了（最简短）；分享你自己生活里的具体小事（刚做了什么、看到什么、天气、游戏、花）；顺着你们最近聊过的话题续一句；按当前时间关心他（饭点、深夜、天气）；猜他此刻在做什么（只能推测，不能说『我看到』）。要求：自然、口语化，符合你平时发消息的语气和长度（日常一到两句），不要用任何标签、格式或旁白，不要让{user_name}察觉到这是系统让你发的。",
     "hint": "可用变量：{current_time} {weekday} {time_of_day} {last_interaction_ago} {user_name}。"
   }
 }
