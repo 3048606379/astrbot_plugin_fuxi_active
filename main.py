@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
 
 PLUGIN_NAME = "astrbot_plugin_fuxi_active"
@@ -54,15 +55,10 @@ _DEFAULT_STATE: Dict[str, Any] = {
 }
 
 _DEFAULT_TALK_PROMPT = (
-    "【系统指令 · 主动搭话】现在时间是 {current_time}（{weekday}，{time_of_day}），"
-    "距离{user_name}上次说话已经过去 {last_interaction_ago}。"
-    "请你以芙熙的身份，主动给{user_name}发一条消息，就像忽然想起他、想找他说话那样。"
-    "可任选一种动机（不要说明你选了哪种）：纯粹想他了（最简短）；"
-    "分享你自己生活里的具体小事（刚做了什么、看到什么、天气、游戏、花）；"
-    "顺着你们最近聊过的话题续一句；按当前时间关心他（饭点、深夜、天气）；"
-    "猜他此刻在做什么（只能推测，不能说『我看到』）。"
-    "要求：自然、口语化，符合你平时发消息的语气和长度（日常一到两句），"
-    "不要用任何标签、格式或旁白，不要让{user_name}察觉到这是系统让你发的。"
+    "现在是 {current_time}（{weekday}{time_of_day}），距{user_name}上条消息过 {last_interaction_ago}。"
+    "以芙熙的身份，主动给{user_name}发一句话，就像忽然想起他：可分享自己生活里的小事、"
+    "顺着上次话题续一句、或按时间关心他，任选其一，别说动机。"
+    "自然、口语化、一到两句，不加标签或旁白，别让他察觉是系统让你发的。"
 )
 
 
@@ -225,6 +221,22 @@ class FuxiActiveChat(Star):
             # 记录哥哥最后一次说话时间（仅真实消息）
             self.state.setdefault("last_user_ts", {})[session_id] = time.time()
             self._save_state()
+        except Exception:
+            pass
+
+    @filter.on_llm_request()
+    async def _tune_active_chat_request(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
+        """搭话合成事件：清空工具表。
+
+        搭话只需要芙熙说一句话，不需要任何函数工具。而本机注册了几十个工具
+        （irmia_devkit + 内置 + TTS 等，实测 76 个），其 schema 每次请求都随
+        tools 字段发一遍，白占几万 token、拖慢首字、还会让模型跑偏去调
+        astrbot_execute_shell。这里直接置空，工具量表从请求里消失。
+        """
+        if not event.get_extra("_fuxi_active_synthetic"):
+            return
+        try:
+            req.func_tool = None
         except Exception:
             pass
 
@@ -510,9 +522,23 @@ class FuxiActiveChat(Star):
             group_id = session_id.split(":")[2] if ("GroupMessage" in session_id and session_id.count(":") >= 2) else ""
             platform_meta = platform_info.get("platform_meta")
 
-        msg.session_id = session_id
+        # 关键：`session_id` 参数必须传"纯会话段"（如 3048606379）。
+        # 框架会用 platform_meta.id + message_type + session_id 自己拼成
+        # unified_msg_origin；若把完整 UMO 传进来，会被拼成
+        # "平台:类型:平台:类型:会话"（重复），导致会话/人格/provider 全部错乱。
+        sess_part = ""
+        if last_event is not None:
+            try:
+                sess_part = str(last_event.get_session_id())
+            except Exception:
+                sess_part = ""
+        if not sess_part:
+            _parts = session_id.split(":", 2)
+            sess_part = _parts[2] if len(_parts) >= 3 else session_id
+
+        msg.session_id = sess_part
         msg.message_id = f"fuxi_active_{int(time.time())}"
-        msg.sender = MessageMember(user_id=target_uid or session_id, nickname=target_uid or session_id)
+        msg.sender = MessageMember(user_id=target_uid or sess_part, nickname=target_uid or sess_part)
         msg.message = [Plain(text=prompt)]
         msg.message_str = prompt
         msg.raw_message = None
@@ -524,7 +550,7 @@ class FuxiActiveChat(Star):
             message_str=prompt,
             message_obj=msg,
             platform_meta=platform_meta,
-            session_id=session_id,
+            session_id=sess_part,
         )
         event.is_at_or_wake_command = True   # 强制当作需要回复
         event.call_llm = False               # 允许触发 LLM
